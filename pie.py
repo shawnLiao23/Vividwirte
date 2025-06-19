@@ -18,7 +18,7 @@ from openai import OpenAI
 from PIL import Image
 import base64
 import io
-
+from typing import Tuple, Dict
 
 # DEPLOT_QUANT_STRATEGY = "fp16"  # {"4bit", "fp16", "fp32"}
 
@@ -67,6 +67,7 @@ def parse_txt_to_dict(txt_content: str) -> Dict[str, Optional[float]]:
                     data[category] = float(percent_match.group(1))
     return data
 
+
 class GraphGenerator:
     def __init__(self):
         self.safe_modules = {
@@ -99,34 +100,36 @@ class GraphGenerator:
         r2, g2, b2 = hex_to_rgb(c2)
         return ((r1 - r2) ** 2 + (g1 - g2) ** 2 + (b1 - b2) ** 2) ** 0.5
 
-    def call_gpt_and_generate(self, initial_instruction: str, requirement: str, student_answer: str, image_path: Optional[str] = None, output_format: str = "json", deplot_txt: str = None) -> Dict:
+    def call_gpt_and_generate(self, initial_instruction: str, requirement: str, student_answer: str,
+                              image_path: Optional[str] = None, output_format: str = "json",
+                              deplot_txt: str = None) -> Dict:
         try:
             system_content = """
             You are a data extractor analyzing student-written IELTS Academic Task 1 answers that describe statistical charts.
 
             1. Identify all explicitly mentioned categories related to data (e.g., government spending, population segments, etc.).
-            
+
             2. For each category:
                - If a percentage value is mentioned (e.g., "12%"), extract it directly.
                - If only an absolute value is given (e.g., "38 billion"), and the total value is not mentioned, you may estimate the percentage using a logical assumption (e.g., based on 100%), but avoid inventing specific totals. The result must still be expressed as a percentage.
                - If **no numerical value** is mentioned at all, **ignore this category completely**. Do not output it, even as `null`.
-            
+
             3. If multiple categories are combined into a single line (e.g., "housing, transport and industry"), **keep them as a combined category**:
                - Do not split them into individual categories.
                - Example: If "housing, transport and industry" is mentioned with 37 billion, it should appear as:
                  - housing, transport and industry | estimated %
-            
+
             4. For ambiguous or generic categories like "other spending", "entire households", or "various", **include them as their own category**:
                - Example: "other spending" should be listed as:
                  - other spending | estimated %
-            
+
             5. If a category is described **relative to another category** (e.g., "about the same as X", "double of Y", "slightly less than Z"):
                - Estimate the percentage based on the described category.
                - Example:
                  - "about the same as health" → if health is 15%, estimate it as 15%.
                  - "double of defence" → if defence is 7%, estimate it as 14%.
                  - "slightly less than education" → if education is 12%, estimate it as around 10-11%.
-            
+
             6. Handle **vague or comparative descriptions** smartly:
                - Phrases like "almost the same as", "slightly higher than", "a bit lower than" should be translated to estimated percentages:
                  - "almost the same as" → ±1~2%
@@ -135,20 +138,20 @@ class GraphGenerator:
                - Example:
                  - "almost the same as single people" → if single people is 24%, estimate it as 23% or 25%.
                  - "slightly higher than aged couples" → if aged couples is 9%, estimate it as 11%.
-            
+
             7. Output all values as **percentages**:
                - Final output must only contain percentages (e.g., `15%`).
                - Do not include raw units like “billion” or “AED”.
                - If the category is mentioned but has no numerical value, **completely remove it from the output**.
-            
+
             8. Your output must be in plain text, using the following structure:
-            
+
                 TITLE | <concise inferred chart title>
-            
+
                 <Category 1> | <percentage>
                 <Category 2> | <percentage>
                 ...
-            
+
                 * Do not include categories without values.
                 * Do not include commentary, explanation, code, or extra formatting.
                 * Do not invent or guess any categories that are not clearly stated in the text.
@@ -191,7 +194,7 @@ class GraphGenerator:
         # predictions = deplot_model.generate(**inputs, max_new_tokens=512)
         # raw_text = deplot_processor.decode(predictions[0], skip_special_tokens=True)
         raw_text = deplot_txt
-        
+
         system_content = """
             You are a data extractor for chart analysis. Your task is to:
 
@@ -314,106 +317,202 @@ class GraphGenerator:
 
         return best_match
 
-
-
-    def extract_pie_chart_color(self, image_path: str, label_name: str) -> str:
-        # ① 读图，转换成 RGB，并转 base64
+    # def extract_pie_chart_color(self, image_path: str, label_name: str) -> str:
+    #     # ① 读图，转换成 RGB，并转 base64
+    #     with Image.open(image_path) as img:
+    #         img.thumbnail((1000, 1000))
+    #
+    #         # 转为 JPEG 并压缩保存到内存
+    #         buffer = BytesIO()
+    #         img.convert("RGB").save(buffer, format="JPEG", quality=95, optimize=False)
+    #
+    #         # 编码为 base64 字符串
+    #         encoded_data = base64.b64encode(buffer.getvalue()).decode("utf-8")
+    #         data_uri = f"data:image/jpeg;base64,{encoded_data}"
+    #
+    #     # ② 构造 messages（把图像和文字放在同一 user 消息里）
+    #     messages = [
+    #         {
+    #             "role": "system",
+    #             "content": (
+    #                 "You are an expert chart analyzer. When I give you a pie-chart image "
+    #                 "and a target label, return **only** the HEX color of that label "
+    #                 "or the word UNKNOWN."
+    #             ),
+    #         },
+    #         {
+    #             "role": "user",
+    #             "content": [
+    #                 {"type": "text", "text": f"Target label: {label_name}"},
+    #                 {"type": "image_url", "image_url": {"url": data_uri}},
+    #             ],
+    #         },
+    #     ]
+    #
+    #     rsp = self.client.chat.completions.create(
+    #         model="gpt-4o",
+    #         messages=messages,
+    #         temperature=0,
+    #         max_tokens=5,
+    #     )
+    #
+    #     color = rsp.choices[0].message.content.strip()
+    #     if color.startswith("#") and len(color) == 7:
+    #         return color
+    #     elif color.upper() == "UNKNOWN":
+    #         random_chart_color = lambda: '#%02x%02x%02x' % tuple(
+    #             int(c * 255) for c in colorsys.hls_to_rgb(
+    #                 random.random(),
+    #                 random.uniform(0.4, 0.7),
+    #                 random.uniform(0.5, 0.8)
+    #             )
+    #         )
+    #         return random_chart_color()
+    #
+    # def compare_and_generate_json(self, deplot_txt: str, student_txt: str, image_path: str,
+    #                               title="Generated Chart") -> Dict:
+    #     deplot_data = parse_txt_to_dict(deplot_txt)
+    #     student_data = parse_txt_to_dict(student_txt)
+    #
+    #     categories = []
+    #     values = []
+    #     categories_match = []
+    #     palette = []
+    #
+    #     # 遍历 DePlot 的顺序
+    #     for cat, deplot_val in deplot_data.items():
+    #         best_match = self.find_best_match_batch(cat, list(student_data.keys()))  # 使用批量对比
+    #         if best_match:
+    #             categories_match.append(best_match)
+    #             categories.append(cat)
+    #             values.append(student_data[best_match])
+    #             palette.append(self.extract_pie_chart_color(image_path, cat))
+    #     for cat in student_data:
+    #         if cat not in categories and cat not in categories_match:
+    #             categories.append(cat)
+    #             values.append(student_data[cat])
+    #             random_chart_color = lambda: '#%02x%02x%02x' % tuple(int(c * 255) for c in
+    #                                                                  colorsys.hls_to_rgb(random.random(),
+    #                                                                                      random.uniform(0.4, 0.7),
+    #                                                                                      random.uniform(0.5, 0.8)))
+    #             palette.append(random_chart_color())
+    #     total = sum(values)
+    #     if total < 100:
+    #         categories.append("Missing")
+    #         values.append(round(100 - total, 1))
+    #         missing_index = len(categories) - 1
+    #         palette.append("#cccccc")  # 给 Missing 塞一只灰色
+    #     else:
+    #         missing_index = None
+    #
+    #     json_output = {
+    #         "title": title,
+    #         "categories": categories,
+    #         "x_label": "",
+    #         "y_label": "Percentage",
+    #         "series": [{"values": values}],
+    #         "chart_type": "pie",
+    #         "style": {
+    #             "color_palette": palette,
+    #         }
+    #     }
+    #     if missing_index is not None:
+    #         json_output["style"]["missing_index"] = missing_index
+    #     return json_output
+    def extract_pie_chart_color(self, image_path: str, label_name: str) -> Tuple[int, int, int]:
+        """
+        读取饼图并返回指定标签的RGB颜色三元组。
+        如果GPT无法识别标签颜色，则随机生成一个RGB三原色元组。
+        """
+        # 打开并压缩图片
         with Image.open(image_path) as img:
             img.thumbnail((1000, 1000))
-
-            # 转为 JPEG 并压缩保存到内存
             buffer = BytesIO()
             img.convert("RGB").save(buffer, format="JPEG", quality=90, optimize=False)
-
-            # 编码为 base64 字符串
             encoded_data = base64.b64encode(buffer.getvalue()).decode("utf-8")
             data_uri = f"data:image/jpeg;base64,{encoded_data}"
 
-        # ② 构造 messages（把图像和文字放在同一 user 消息里）
+        # GPT调用
         messages = [
-            {
-                "role": "system",
-                "content": (
-                    "You are an expert chart analyzer. When I give you a pie-chart image "
-                    "and a target label, return **only** the HEX color of that label "
-                    "or the word UNKNOWN."
-                ),
-            },
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": f"Target label: {label_name}"},
-                    {"type": "image_url", "image_url": {"url": data_uri}},
-                ],
-            },
+            {"role": "system", "content": (
+                "You are an expert chart analyzer. When I give you a pie-chart image and a target label, "
+                "return **only** the RGB values of that label in the format 'R,G,B' or the word 'UNKNOWN'."
+            )},
+            {"role": "user", "content": [
+                {"type": "text", "text": f"Target label: {label_name}"},
+                {"type": "image_url", "image_url": {"url": data_uri}},
+            ]},
         ]
-
         rsp = self.client.chat.completions.create(
             model="gpt-4o",
             messages=messages,
             temperature=0,
-            max_tokens=5,
+            max_tokens=10,
         )
+        raw = rsp.choices[0].message.content.strip()
 
-        color = rsp.choices[0].message.content.strip()
-        if color.startswith("#") and len(color) == 7:
-            return color
-        elif color.upper() == "UNKNOWN":
-            random_chart_color = lambda: '#%02x%02x%02x' % tuple(
-                int(c * 255) for c in colorsys.hls_to_rgb(
-                    random.random(),
-                    random.uniform(0.4, 0.7),
-                    random.uniform(0.5, 0.8)
-                )
-            )
-            return random_chart_color()
+        # 解析返回的RGB或UNKNOWN
+        if raw.upper() == "UNKNOWN":
+            # 生成随机颜色
+            r, g, b = (int(c * 255) for c in colorsys.hls_to_rgb(
+                random.random(), random.uniform(0.4, 0.7), random.uniform(0.5, 0.8)
+            ))
+            return (r, g, b)
+        # 假设格式为 'R,G,B' 或 '[R,G,B]'
+        nums = raw.replace('[', '').replace(']', '').split(',')
+        try:
+            r, g, b = map(lambda x: int(x.strip()), nums)
+            return (r, g, b)
+        except Exception:
+            # 回退随机颜色
+            r, g, b = (int(c * 255) for c in colorsys.hls_to_rgb(
+                random.random(), random.uniform(0.4, 0.7), random.uniform(0.5, 0.8)
+            ))
+            return (r, g, b)
 
-    def compare_and_generate_json(self, deplot_txt: str, student_txt: str, image_path: str, title="Generated Chart") -> Dict:
+    def compare_and_generate_json(self, deplot_txt: str, student_txt: str, image_path: str,
+                                  title="Generated Chart") -> Dict:
         deplot_data = parse_txt_to_dict(deplot_txt)
         student_data = parse_txt_to_dict(student_txt)
 
-        categories = []
-        values = []
-        categories_match = []
-        palette = []
+        categories, values, palette = [], [], []
+        matched = set()
 
-        # 遍历 DePlot 的顺序
-        for cat, deplot_val in deplot_data.items():
-            best_match = self.find_best_match_batch(cat, list(student_data.keys()))  # 使用批量对比
-            if best_match:
-                categories_match.append(best_match)
+        # 匹配并获取颜色
+        for cat, _ in deplot_data.items():
+            best = self.find_best_match_batch(cat, list(student_data.keys()))
+            if best:
                 categories.append(cat)
-                values.append(student_data[best_match])
-                palette.append(self.extract_pie_chart_color(image_path, cat))
-        for cat in student_data:
-            if cat not in categories and cat not in categories_match:
+                values.append(student_data[best])
+                palette.append(list(self.extract_pie_chart_color(image_path, cat)))
+                matched.add(best)
+        # 剩余类别随机颜色
+        for cat, val in student_data.items():
+            if cat not in matched:
                 categories.append(cat)
-                values.append(student_data[cat])
-                random_chart_color = lambda: '#%02x%02x%02x' % tuple(int(c * 255) for c in colorsys.hls_to_rgb(random.random(), random.uniform(0.4, 0.7), random.uniform(0.5, 0.8)))
-                palette.append(random_chart_color())
+                values.append(val)
+                palette.append(list(self.extract_pie_chart_color(image_path, cat)))
+
         total = sum(values)
+        missing_index = None
         if total < 100:
             categories.append("Missing")
             values.append(round(100 - total, 1))
+            palette.append([204, 204, 204])  # 灰色
             missing_index = len(categories) - 1
-            palette.append("#cccccc")  # 给 Missing 塞一只灰色
-        else:
-            missing_index = None
 
-        json_output = {
+        output = {
             "title": title,
             "categories": categories,
             "x_label": "",
             "y_label": "Percentage",
             "series": [{"values": values}],
             "chart_type": "pie",
-            "style": {
-            "color_palette": palette,
-            }
+            "style": {"color_palette": palette}
         }
         if missing_index is not None:
-            json_output["style"]["missing_index"] = missing_index
-        return json_output
+            output["style"]["missing_index"] = missing_index
+        return output
 
     def _process_response(self, response, output_format: str, image_path, deplot_txt) -> Dict:
         """
@@ -539,7 +638,7 @@ class GraphGenerator:
         return match.group(1).strip() if match else None
 
 
-#------------------ 使用示例 ------------------
+# ------------------ 使用示例 ------------------
 if __name__ == "__main__":
     # 输入参数配置
     initial_instruction = (
@@ -579,17 +678,17 @@ At a glance, in the given year, 14% of the entire households in the country were
 As far as the people with no children are concerned, single people were of the hefty percentage, 24%, almost the same number for single people with children. On the contrary, merely 9% of the couples without any children agonized from poverty in 2002. Coming to aged people, singles had a somewhat higher percentage in comparison to couples. Only 7% and 5% of the aged population had difficulties in their living conditions.
         """
     )
-#     student_answer = (
-#             """
-#             The graph communicates the budget created by the UAE government in the year 2000. All in all, the essential targets that the government had were social security, health and education.
-#
-# The largest space is covered by social security, such as pensions, employment assistance and other benefits, making slightly less than one-third of the entire expense. The second highest expense of the budget were health and personal social services. Hospital and medical services covered AED 53 billion, or about 15% of the budget. On the other hand, education cost UAE AED 38 billion, comprising nearly 12% of the entire budget. The government spent approximately 7% of revenue on debt, and just about similar amounts were spent on defence, which was AED 22 billion, and law and order, which comprised AED 17 billion.
-#
-# Expenditure on housing, transport and industry came to a total of AED 37 billion. Lastly, other spending reported for AED 23 billion.
-#             """
-#         )
+    #     student_answer = (
+    #             """
+    #             The graph communicates the budget created by the UAE government in the year 2000. All in all, the essential targets that the government had were social security, health and education.
+    #
+    # The largest space is covered by social security, such as pensions, employment assistance and other benefits, making slightly less than one-third of the entire expense. The second highest expense of the budget were health and personal social services. Hospital and medical services covered AED 53 billion, or about 15% of the budget. On the other hand, education cost UAE AED 38 billion, comprising nearly 12% of the entire budget. The government spent approximately 7% of revenue on debt, and just about similar amounts were spent on defence, which was AED 22 billion, and law and order, which comprised AED 17 billion.
+    #
+    # Expenditure on housing, transport and industry came to a total of AED 37 billion. Lastly, other spending reported for AED 23 billion.
+    #             """
+    #         )
 
-    #初始化生成器
+    # 初始化生成器
     generator = GraphGenerator()
     deplot_txt = "TITLE | Proportion of people from each household type living in poverty<0x0A>All households<0x0A>14% | Single aged person<0x0A>7% <0x0A> Aged couple<0x0A>5% | 5% <0x0A> Couple with children<0x0A>15% | 15% <0x0A> Single, no children<0x0A>24% | 24% <0x0A> Sole parent<0x0A>26% | 26% <0x0A> Couple, no children<0x0A>9% | 9%"
     # 执行API调用
