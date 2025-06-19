@@ -317,202 +317,212 @@ class GraphGenerator:
 
         return best_match
 
-    def extract_pie_chart_color(self, image_path: str, label_name: str) -> str:
-        # ① 读图，转换成 RGB，并转 base64
-        with Image.open(image_path) as img:
-            img.thumbnail((1000, 1000))
-    
-            # 转为 JPEG 并压缩保存到内存
-            buffer = BytesIO()
-            img.convert("RGB").save(buffer, format="JPEG", quality=95, optimize=False)
-    
-            # 编码为 base64 字符串
-            encoded_data = base64.b64encode(buffer.getvalue()).decode("utf-8")
-            data_uri = f"data:image/jpeg;base64,{encoded_data}"
-    
-        # ② 构造 messages（把图像和文字放在同一 user 消息里）
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "You are an expert chart analyzer. When I give you a pie-chart image "
-                    "and a target label, return **only** the HEX color of that label "
-                    "or the word UNKNOWN."
-                ),
-            },
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": f"Target label: {label_name}"},
-                    {"type": "image_url", "image_url": {"url": data_uri}},
-                ],
-            },
-        ]
-    
-        rsp = self.client.chat.completions.create(
-            model="gpt-4o",
-            messages=messages,
-            temperature=0,
-            max_tokens=5,
-        )
-    
-        color = rsp.choices[0].message.content.strip()
-        if color.startswith("#") and len(color) == 7:
-            return color
-        elif color.upper() == "UNKNOWN":
-            random_chart_color = lambda: '#%02x%02x%02x' % tuple(
-                int(c * 255) for c in colorsys.hls_to_rgb(
-                    random.random(),
-                    random.uniform(0.4, 0.7),
-                    random.uniform(0.5, 0.8)
-                )
-            )
-            return random_chart_color()
-    
-    def compare_and_generate_json(self, deplot_txt: str, student_txt: str, image_path: str,
-                                  title="Generated Chart") -> Dict:
-        deplot_data = parse_txt_to_dict(deplot_txt)
-        student_data = parse_txt_to_dict(student_txt)
-    
-        categories = []
-        values = []
-        categories_match = []
-        palette = []
-    
-        # 遍历 DePlot 的顺序
-        for cat, deplot_val in deplot_data.items():
-            best_match = self.find_best_match_batch(cat, list(student_data.keys()))  # 使用批量对比
-            if best_match:
-                categories_match.append(best_match)
-                categories.append(cat)
-                values.append(student_data[best_match])
-                palette.append(self.extract_pie_chart_color(image_path, cat))
-        for cat in student_data:
-            if cat not in categories and cat not in categories_match:
-                categories.append(cat)
-                values.append(student_data[cat])
-                random_chart_color = lambda: '#%02x%02x%02x' % tuple(int(c * 255) for c in
-                                                                     colorsys.hls_to_rgb(random.random(),
-                                                                                         random.uniform(0.4, 0.7),
-                                                                                         random.uniform(0.5, 0.8)))
-                palette.append(random_chart_color())
-        total = sum(values)
-        if total < 100:
-            categories.append("Missing")
-            values.append(round(100 - total, 1))
-            missing_index = len(categories) - 1
-            palette.append("#cccccc")  # 给 Missing 塞一只灰色
-        else:
-            missing_index = None
-    
-        json_output = {
-            "title": title,
-            "categories": categories,
-            "x_label": "",
-            "y_label": "Percentage",
-            "series": [{"values": values}],
-            "chart_type": "pie",
-            "style": {
-                "color_palette": palette,
-            }
-        }
-        if missing_index is not None:
-            json_output["style"]["missing_index"] = missing_index
-        return json_output
-    # def extract_pie_chart_color(self, image_path: str, label_name: str) -> Tuple[int, int, int]:
-    #     """
-    #     读取饼图并返回指定标签的RGB颜色三元组。
-    #     如果GPT无法识别标签颜色，则随机生成一个RGB三原色元组。
-    #     """
-    #     # 打开并压缩图片
+    # def extract_pie_chart_color(self, image_path: str, label_name: str) -> str:
+    #     # ① 读图，转换成 RGB，并转 base64
     #     with Image.open(image_path) as img:
     #         img.thumbnail((1000, 1000))
+    #
+    #         # 转为 JPEG 并压缩保存到内存
     #         buffer = BytesIO()
-    #         img.convert("RGB").save(buffer, format="JPEG", quality=90, optimize=False)
+    #         img.convert("RGB").save(buffer, format="JPEG", quality=95, optimize=False)
+    #
+    #         # 编码为 base64 字符串
     #         encoded_data = base64.b64encode(buffer.getvalue()).decode("utf-8")
     #         data_uri = f"data:image/jpeg;base64,{encoded_data}"
-
-    #     # GPT调用
+    #
+    #     # ② 构造 messages（把图像和文字放在同一 user 消息里）
     #     messages = [
-    #         {"role": "system", "content": (
-    #             "You are an expert chart analyzer. When I give you a pie-chart image and a target label, "
-    #             "return **only** the RGB values of that label in the format 'R,G,B' or the word 'UNKNOWN'."
-    #         )},
-    #         {"role": "user", "content": [
-    #             {"type": "text", "text": f"Target label: {label_name}"},
-    #             {"type": "image_url", "image_url": {"url": data_uri}},
-    #         ]},
+    #         {
+    #             "role": "system",
+    #             "content": (
+    #                 "You are an expert chart analyzer. When I give you a pie-chart image "
+    #                 "and a target label, return **only** the HEX color of that label "
+    #                 "or the word UNKNOWN."
+    #             ),
+    #         },
+    #         {
+    #             "role": "user",
+    #             "content": [
+    #                 {"type": "text", "text": f"Target label: {label_name}"},
+    #                 {"type": "image_url", "image_url": {"url": data_uri}},
+    #             ],
+    #         },
     #     ]
+    #
     #     rsp = self.client.chat.completions.create(
     #         model="gpt-4o",
     #         messages=messages,
     #         temperature=0,
-    #         max_tokens=10,
+    #         max_tokens=5,
     #     )
-    #     raw = rsp.choices[0].message.content.strip()
-
-    #     # 解析返回的RGB或UNKNOWN
-    #     if raw.upper() == "UNKNOWN":
-    #         # 生成随机颜色
-    #         r, g, b = (int(c * 255) for c in colorsys.hls_to_rgb(
-    #             random.random(), random.uniform(0.4, 0.7), random.uniform(0.5, 0.8)
-    #         ))
-    #         return (r, g, b)
-    #     # 假设格式为 'R,G,B' 或 '[R,G,B]'
-    #     nums = raw.replace('[', '').replace(']', '').split(',')
-    #     try:
-    #         r, g, b = map(lambda x: int(x.strip()), nums)
-    #         return (r, g, b)
-    #     except Exception:
-    #         # 回退随机颜色
-    #         r, g, b = (int(c * 255) for c in colorsys.hls_to_rgb(
-    #             random.random(), random.uniform(0.4, 0.7), random.uniform(0.5, 0.8)
-    #         ))
-    #         return (r, g, b)
-
+    #
+    #     color = rsp.choices[0].message.content.strip()
+    #     if color.startswith("#") and len(color) == 7:
+    #         return color
+    #     elif color.upper() == "UNKNOWN":
+    #         random_chart_color = lambda: '#%02x%02x%02x' % tuple(
+    #             int(c * 255) for c in colorsys.hls_to_rgb(
+    #                 random.random(),
+    #                 random.uniform(0.4, 0.7),
+    #                 random.uniform(0.5, 0.8)
+    #             )
+    #         )
+    #         return random_chart_color()
+    #
     # def compare_and_generate_json(self, deplot_txt: str, student_txt: str, image_path: str,
     #                               title="Generated Chart") -> Dict:
     #     deplot_data = parse_txt_to_dict(deplot_txt)
     #     student_data = parse_txt_to_dict(student_txt)
-
-    #     categories, values, palette = [], [], []
-    #     matched = set()
-
-    #     # 匹配并获取颜色
-    #     for cat, _ in deplot_data.items():
-    #         best = self.find_best_match_batch(cat, list(student_data.keys()))
-    #         if best:
+    #
+    #     categories = []
+    #     values = []
+    #     categories_match = []
+    #     palette = []
+    #
+    #     # 遍历 DePlot 的顺序
+    #     for cat, deplot_val in deplot_data.items():
+    #         best_match = self.find_best_match_batch(cat, list(student_data.keys()))  # 使用批量对比
+    #         if best_match:
+    #             categories_match.append(best_match)
     #             categories.append(cat)
-    #             values.append(student_data[best])
-    #             palette.append(list(self.extract_pie_chart_color(image_path, cat)))
-    #             matched.add(best)
-    #     # 剩余类别随机颜色
-    #     for cat, val in student_data.items():
-    #         if cat not in matched:
+    #             values.append(student_data[best_match])
+    #             palette.append(self.extract_pie_chart_color(image_path, cat))
+    #     for cat in student_data:
+    #         if cat not in categories and cat not in categories_match:
     #             categories.append(cat)
-    #             values.append(val)
-    #             palette.append(list(self.extract_pie_chart_color(image_path, cat)))
-
+    #             values.append(student_data[cat])
+    #             random_chart_color = lambda: '#%02x%02x%02x' % tuple(int(c * 255) for c in
+    #                                                                  colorsys.hls_to_rgb(random.random(),
+    #                                                                                      random.uniform(0.4, 0.7),
+    #                                                                                      random.uniform(0.5, 0.8)))
+    #             palette.append(random_chart_color())
     #     total = sum(values)
-    #     missing_index = None
     #     if total < 100:
     #         categories.append("Missing")
     #         values.append(round(100 - total, 1))
-    #         palette.append([204, 204, 204])  # 灰色
     #         missing_index = len(categories) - 1
-
-    #     output = {
+    #         palette.append("#cccccc")  # 给 Missing 塞一只灰色
+    #     else:
+    #         missing_index = None
+    #
+    #     json_output = {
     #         "title": title,
     #         "categories": categories,
     #         "x_label": "",
     #         "y_label": "Percentage",
     #         "series": [{"values": values}],
     #         "chart_type": "pie",
-    #         "style": {"color_palette": palette}
+    #         "style": {
+    #             "color_palette": palette,
+    #         }
     #     }
     #     if missing_index is not None:
-    #         output["style"]["missing_index"] = missing_index
-    #     return output
+    #         json_output["style"]["missing_index"] = missing_index
+    #     return json_output
+    def extract_pie_chart_color(self, image_path: str, label_name: str) -> tuple:
+        """
+        读取饼图并返回指定标签的归一化RGB颜色元组(0-1范围)
+        """
+        # 打开并压缩图片
+        with Image.open(image_path) as img:
+            img.thumbnail((1000, 1000))
+            buffer = BytesIO()
+            img.convert("RGB").save(buffer, format="JPEG", quality=90, optimize=False)
+            encoded_data = base64.b64encode(buffer.getvalue()).decode("utf-8")
+            data_uri = f"data:image/jpeg;base64,{encoded_data}"
+
+        # GPT调用
+        messages = [
+            {"role": "system", "content": (
+                "You are an expert chart analyzer. When I give you a pie-chart image and a target label, "
+                "return **only** the RGB values of that label in the format 'R,G,B' or the word 'UNKNOWN'."
+            )},
+            {"role": "user", "content": [
+                {"type": "text", "text": f"Target label: {label_name}"},
+                {"type": "image_url", "image_url": {"url": data_uri}},
+            ]},
+        ]
+        rsp = self.client.chat.completions.create(
+            model="gpt-4o",
+            messages=messages,
+            temperature=0,
+            max_tokens=10,
+        )
+        raw = rsp.choices[0].message.content.strip()
+
+        # 解析返回的RGB或UNKNOWN
+        if raw.upper() == "UNKNOWN":
+            # 生成随机颜色并归一化到0-1范围
+            return (
+                random.random(),
+                random.random(),
+                random.random()
+            )
+
+        # 尝试解析RGB格式
+        try:
+            # 处理各种可能的格式: "255,0,0", "[255,0,0]", "(255,0,0)"等
+            clean_raw = raw.strip("[]()")
+            r, g, b = map(lambda x: int(x.strip()), clean_raw.split(','))
+
+            # 将0-255范围转换为0-1范围
+            return (
+                r / 255.0,
+                g / 255.0,
+                b / 255.0
+            )
+        except Exception:
+            # 解析失败时返回随机颜色
+            return (
+                random.random(),
+                random.random(),
+                random.random()
+            )
+
+    def compare_and_generate_json(self, deplot_txt: str, student_txt: str, image_path: str,
+                                  title="Generated Chart") -> Dict:
+        deplot_data = parse_txt_to_dict(deplot_txt)
+        student_data = parse_txt_to_dict(student_txt)
+
+        categories, values, palette = [], [], []
+        matched = set()
+
+        # 匹配并获取颜色
+        for cat, _ in deplot_data.items():
+            best = self.find_best_match_batch(cat, list(student_data.keys()))
+            if best:
+                categories.append(cat)
+                values.append(student_data[best])
+                palette.append(self.extract_pie_chart_color(image_path, cat))
+                matched.add(best)
+
+        # 剩余类别
+        for cat, val in student_data.items():
+            if cat not in matched:
+                categories.append(cat)
+                values.append(val)
+                palette.append(self.extract_pie_chart_color(image_path, cat))
+
+        total = sum(values)
+        missing_index = None
+        if total < 100:
+            categories.append("Missing")
+            values.append(round(100 - total, 1))
+            palette.append((0.8, 0.8, 0.8))  # 灰色 (归一化)
+            missing_index = len(categories) - 1
+
+        output = {
+            "title": title,
+            "categories": categories,
+            "x_label": "",
+            "y_label": "Percentage",
+            "series": [{"values": values}],
+            "chart_type": "pie",
+            "style": {"color_palette": palette}
+        }
+        if missing_index is not None:
+            output["style"]["missing_index"] = missing_index
+        return output
 
     def _process_response(self, response, output_format: str, image_path, deplot_txt) -> Dict:
         """
